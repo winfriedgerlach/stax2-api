@@ -83,6 +83,13 @@ public class Stax2ReaderAdapter
      */
     protected String _typedContent;
 
+    /**
+     * Offset within {@link #_typedContent} of content not yet decoded;
+     * kept instead of cutting off decoded content, which would copy the
+     * rest on every call (and make chunked decoding quadratic).
+     */
+    protected int _typedContentPtr;
+
     /*
     ///////////////////////////////////////////////////////////////////////
     // Life-cycle methods
@@ -299,6 +306,7 @@ public class Stax2ReaderAdapter
                 throw new IllegalStateException("First call to readElementAsArray() must be for a START_ELEMENT");
             }
             _typedContent = getElementText();
+            _typedContentPtr = 0;
             /* This will move current event to END_ELEMENT, too...
              * But should we mask it (and claim it's, say, CHARACTERS)
              * or expose as is? For now, let's do latter, simplest
@@ -307,7 +315,7 @@ public class Stax2ReaderAdapter
         // Ok, so what do we have left?
         String input = _typedContent;
         final int end = input.length();
-        int ptr = 0;
+        int ptr = _typedContentPtr;
         int count = 0;
         String value = null;
 
@@ -343,9 +351,12 @@ public class Stax2ReaderAdapter
             Location loc = getLocation();
             throw new TypedXMLStreamException(value, iae.getMessage(), loc, iae);
         } finally {
-            int len = end-ptr;
             // null works well as the marker for complete processing
-            _typedContent = (len < 1) ? null : input.substring(ptr);
+            if (ptr >= end) {
+                _typedContent = null;
+            } else {
+                _typedContentPtr = ptr;
+            }
         }
         return (count < 1) ? -1 : count;
     }

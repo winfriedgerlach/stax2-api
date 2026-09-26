@@ -183,6 +183,14 @@ public abstract class DOMWrappingReader
     protected String _coalescedText;
 
     /**
+     * Offset within {@link #_coalescedText} of content not yet decoded by
+     * {@link #readElementAsArray}; kept instead of cutting off decoded
+     * content, which would copy the rest on every call (and make chunked
+     * decoding quadratic). Zero outside of typed array access.
+     */
+    protected int _coalescedTextPtr;
+
+    /**
      * Helper object used for combining segments of text as needed
      */
     protected Stax2Util.TextBuffer _textBuffer = new Stax2Util.TextBuffer();
@@ -717,6 +725,11 @@ public abstract class DOMWrappingReader
     public String getText()
     {
         if (_coalescedText != null) {
+            // Partially decoded as typed array? Only the rest is to be exposed
+            if (_coalescedTextPtr > 0) {
+                _coalescedText = _coalescedText.substring(_coalescedTextPtr);
+                _coalescedTextPtr = 0;
+            }
             return _coalescedText;
         }
         if (((1 << _currEvent) & MASK_GET_TEXT) == 0) {
@@ -893,6 +906,7 @@ public abstract class DOMWrappingReader
     public int next() throws XMLStreamException
     {
         _coalescedText = null;
+        _coalescedTextPtr = 0;
 
         /* For most events, we just need to find the next sibling; and
          * that failing, close the parent element. But there are couple
@@ -1325,6 +1339,7 @@ public abstract class DOMWrappingReader
                 return -1;
             }
             _coalescedText = coalesceTypedText(fc);
+            _coalescedTextPtr = 0;
             _currEvent = CHARACTERS;
             _currNode = _currNode.getLastChild();
         } else {
@@ -1351,7 +1366,7 @@ public abstract class DOMWrappingReader
         // Ok, so what do we have left?
         String input = _coalescedText;
         final int end = input.length();
-        int ptr = 0;
+        int ptr = _coalescedTextPtr;
         int count = 0;
         String value = null;
 
@@ -1387,8 +1402,12 @@ public abstract class DOMWrappingReader
             Location loc = getLocation();
             throw new TypedXMLStreamException(value, iae.getMessage(), loc, iae);
         } finally {
-            int len = end-ptr;
-            _coalescedText = (len < 1) ? "" : input.substring(ptr);
+            if (ptr >= end) {
+                _coalescedText = "";
+                _coalescedTextPtr = 0;
+            } else {
+                _coalescedTextPtr = ptr;
+            }
         }
 
         if (count < 1) { // end
